@@ -40,5 +40,15 @@ FILTER_MIN_SCORE: int = 0  # minimum relevance score to include (0 = show all)
 ENABLE_ARXIV_FALLBACK: bool = os.getenv("ENABLE_ARXIV_FALLBACK", "true").lower() == "true"
 ENABLE_ARXIV_ALWAYS: bool = os.getenv("ENABLE_ARXIV_ALWAYS", "false").lower() == "true"
 
+# --- Firebase Authentication ---
+FIREBASE_API_KEY: str = os.getenv("FIREBASE_API_KEY", "")
+FIREBASE_AUTH_DOMAIN: str = os.getenv("FIREBASE_AUTH_DOMAIN", "")
+FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "")
+FIREBASE_STORAGE_BUCKET: str = os.getenv("FIREBASE_STORAGE_BUCKET", "")
+FIREBASE_MESSAGING_SENDER_ID: str = os.getenv("FIREBASE_MESSAGING_SENDER_ID", "")
+FIREBASE_APP_ID: str = os.getenv("FIREBASE_APP_ID", "")
+FIREBASE_DATABASE_URL: str = os.getenv("FIREBASE_DATABASE_URL", "")
+GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+
 # --- Logging ---
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

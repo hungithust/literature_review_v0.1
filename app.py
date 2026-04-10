@@ -4,6 +4,7 @@ AI SOTA Radar — Streamlit Dashboard.
 Main entry point for the web application.
 Provides a clean UI for inputting research profiles
 and viewing paper recommendations.
+Includes Firebase Authentication (Email/Password + Google).
 """
 
 import json
@@ -16,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from workflow import run_pipeline
 from schemas import FinalPaperCard
+from config import FIREBASE_API_KEY, GOOGLE_CLIENT_ID
 
 
 # --- Page Configuration ---
@@ -29,6 +31,11 @@ st.set_page_config(
 # --- Custom CSS ---
 st.markdown("""
 <style>
+    /* Import Google Font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+    * { font-family: 'Inter', sans-serif; }
+
     /* Global styles */
     .main > div { padding-top: 1rem; }
 
@@ -49,6 +56,108 @@ st.markdown("""
     .app-header p {
         color: #6b7280;
         font-size: 1.1rem;
+    }
+
+    /* Auth page styles */
+    .auth-container {
+        max-width: 440px;
+        margin: 0 auto;
+        padding: 2.5rem;
+        background: linear-gradient(145deg, #ffffff 0%, #f8f9ff 100%);
+        border-radius: 24px;
+        border: 1px solid #e0e7ff;
+        box-shadow: 0 20px 60px rgba(102, 126, 234, 0.08),
+                    0 4px 16px rgba(0, 0, 0, 0.04);
+    }
+    .auth-title {
+        text-align: center;
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #1e293b;
+        margin-bottom: 0.3rem;
+    }
+    .auth-subtitle {
+        text-align: center;
+        color: #6b7280;
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+    }
+
+    .auth-divider {
+        display: flex;
+        align-items: center;
+        text-align: center;
+        margin: 1.5rem 0;
+        color: #9ca3af;
+        font-size: 0.85rem;
+    }
+    .auth-divider::before,
+    .auth-divider::after {
+        content: '';
+        flex: 1;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    .auth-divider::before { margin-right: 1rem; }
+    .auth-divider::after { margin-left: 1rem; }
+
+    /* Google button */
+    .google-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.6rem;
+        width: 100%;
+        padding: 0.75rem 1.5rem;
+        background: white;
+        border: 1.5px solid #dadce0;
+        border-radius: 12px;
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: #3c4043;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-decoration: none;
+    }
+    .google-btn:hover {
+        background: #f8f9fa;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        border-color: #c0c0c0;
+    }
+    .google-btn img {
+        width: 20px;
+        height: 20px;
+    }
+
+    /* User bar */
+    .user-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        padding: 0.8rem 1rem;
+        background: linear-gradient(135deg, #ede9fe 0%, #e0e7ff 100%);
+        border-radius: 12px;
+        margin-bottom: 1rem;
+    }
+    .user-avatar {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 700;
+        font-size: 1rem;
+    }
+    .user-email {
+        color: #4338ca;
+        font-weight: 600;
+        font-size: 0.9rem;
+    }
+    .user-label {
+        color: #6b7280;
+        font-size: 0.75rem;
     }
 
     /* Paper card */
@@ -138,12 +247,338 @@ st.markdown("""
     .stat-item { text-align: center; flex: 1; }
     .stat-number { font-size: 1.5rem; font-weight: 800; color: #4f46e5; }
     .stat-label { font-size: 0.8rem; color: #6b7280; }
+
+    /* Streamlit overrides for auth forms */
+    .stTextInput > div > div > input {
+        border-radius: 10px !important;
+        border: 1.5px solid #e0e7ff !important;
+        padding: 0.6rem 1rem !important;
+    }
+    .stTextInput > div > div > input:focus {
+        border-color: #667eea !important;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2) !important;
+    }
+
+    /* Success animation */
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .auth-success {
+        animation: fadeInUp 0.5s ease-out;
+        text-align: center;
+        padding: 2rem;
+    }
+    .auth-success .check-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
+# ──────────────────────────────────────────────
+#  Auth helpers
+# ──────────────────────────────────────────────
+
+def _init_session_state():
+    """Initialize auth-related session state."""
+    defaults = {
+        "authenticated": False,
+        "user_email": None,
+        "user_id": None,
+        "auth_token": None,
+        "refresh_token": None,
+        "display_name": None,
+        "photo_url": None,
+        "results": None,
+        "profile": None,
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
+
+
+def _set_user_session(user_data: dict):
+    """Store user info in Streamlit session."""
+    st.session_state.authenticated = True
+    st.session_state.user_email = user_data.get("email", "")
+    st.session_state.user_id = user_data.get("user_id", "")
+    st.session_state.auth_token = user_data.get("token", "")
+    st.session_state.refresh_token = user_data.get("refresh_token", "")
+    st.session_state.display_name = user_data.get("display_name", "")
+    st.session_state.photo_url = user_data.get("photo_url", "")
+
+
+def _clear_user_session():
+    """Clear user session on logout."""
+    st.session_state.authenticated = False
+    st.session_state.user_email = None
+    st.session_state.user_id = None
+    st.session_state.auth_token = None
+    st.session_state.refresh_token = None
+    st.session_state.display_name = None
+    st.session_state.photo_url = None
+    st.session_state.results = None
+    st.session_state.profile = None
+
+
+def _parse_firebase_error(err: Exception) -> str:
+    """Extract human-readable error from Firebase exceptions."""
+    error_str = str(err)
+    error_map = {
+        "EMAIL_EXISTS": "Email này đã được đăng ký. Vui lòng đăng nhập.",
+        "EMAIL_NOT_FOUND": "Email không tồn tại. Vui lòng đăng ký tài khoản mới.",
+        "INVALID_PASSWORD": "Mật khẩu không đúng. Vui lòng thử lại.",
+        "INVALID_EMAIL": "Email không hợp lệ.",
+        "WEAK_PASSWORD": "Mật khẩu phải có ít nhất 6 ký tự.",
+        "USER_DISABLED": "Tài khoản đã bị vô hiệu hóa.",
+        "TOO_MANY_ATTEMPTS_TRY_LATER": "Quá nhiều lần thử. Vui lòng thử lại sau.",
+        "INVALID_LOGIN_CREDENTIALS": "Email hoặc mật khẩu không đúng.",
+    }
+    for key, message in error_map.items():
+        if key in error_str:
+            return message
+    return f"Lỗi xác thực: {error_str}"
+
+
+# ──────────────────────────────────────────────
+#  Auth UI
+# ──────────────────────────────────────────────
+
+def _render_auth_page():
+    """Render the login/signup page."""
+
+    # Header
+    st.markdown("""
+    <div class="app-header">
+        <h1>🔬 AI SOTA Radar</h1>
+        <p>Personalized Research Paper Tracker</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Check if Firebase is configured
+    if not FIREBASE_API_KEY:
+        st.warning(
+            "⚠️ Firebase chưa được cấu hình. Vui lòng thêm `FIREBASE_API_KEY` và các biến khác vào file `.env`.\n\n"
+            "Đang chuyển sang chế độ **không cần đăng nhập** để demo..."
+        )
+        st.divider()
+        if st.button("🚀 Tiếp tục không cần đăng nhập (Demo Mode)", type="primary", use_container_width=True):
+            st.session_state.authenticated = True
+            st.session_state.user_email = "demo@ai-sota-radar.local"
+            st.session_state.display_name = "Demo User"
+            st.rerun()
+        return
+
+    # Auth container
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown('<div class="auth-container">', unsafe_allow_html=True)
+
+        # Tab selection
+        tab_login, tab_signup = st.tabs(["🔐 Đăng nhập", "📝 Đăng ký"])
+
+        # ─── Login Tab ───
+        with tab_login:
+            st.markdown('<p class="auth-title">Chào mừng trở lại!</p>', unsafe_allow_html=True)
+            st.markdown('<p class="auth-subtitle">Đăng nhập để truy cập AI SOTA Radar</p>', unsafe_allow_html=True)
+
+            with st.form("login_form", clear_on_submit=False):
+                login_email = st.text_input(
+                    "📧 Email",
+                    placeholder="you@example.com",
+                    key="login_email_input",
+                )
+                login_password = st.text_input(
+                    "🔑 Mật khẩu",
+                    type="password",
+                    placeholder="Nhập mật khẩu",
+                    key="login_password_input",
+                )
+                login_submit = st.form_submit_button(
+                    "🔐 Đăng nhập",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if login_submit:
+                if not login_email or not login_password:
+                    st.error("Vui lòng nhập email và mật khẩu.")
+                else:
+                    _handle_email_login(login_email, login_password)
+
+            # Divider
+            st.markdown('<div class="auth-divider">hoặc</div>', unsafe_allow_html=True)
+
+            # Google Sign-In button
+            _render_google_signin_button()
+
+        # ─── Signup Tab ───
+        with tab_signup:
+            st.markdown('<p class="auth-title">Tạo tài khoản mới</p>', unsafe_allow_html=True)
+            st.markdown('<p class="auth-subtitle">Đăng ký để bắt đầu theo dõi nghiên cứu</p>', unsafe_allow_html=True)
+
+            with st.form("signup_form", clear_on_submit=False):
+                signup_email = st.text_input(
+                    "📧 Email",
+                    placeholder="you@example.com",
+                    key="signup_email_input",
+                )
+                signup_password = st.text_input(
+                    "🔑 Mật khẩu",
+                    type="password",
+                    placeholder="Ít nhất 6 ký tự",
+                    key="signup_password_input",
+                )
+                signup_confirm = st.text_input(
+                    "🔑 Xác nhận mật khẩu",
+                    type="password",
+                    placeholder="Nhập lại mật khẩu",
+                    key="signup_confirm_input",
+                )
+                signup_submit = st.form_submit_button(
+                    "📝 Đăng ký",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if signup_submit:
+                if not signup_email or not signup_password:
+                    st.error("Vui lòng nhập đầy đủ thông tin.")
+                elif signup_password != signup_confirm:
+                    st.error("Mật khẩu xác nhận không khớp.")
+                elif len(signup_password) < 6:
+                    st.error("Mật khẩu phải có ít nhất 6 ký tự.")
+                else:
+                    _handle_email_signup(signup_email, signup_password)
+
+            # Divider
+            st.markdown('<div class="auth-divider">hoặc</div>', unsafe_allow_html=True)
+
+            # Google Sign-In button
+            _render_google_signin_button(key_suffix="signup")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+def _handle_email_login(email: str, password: str):
+    """Handle email/password login."""
+    try:
+        from auth.firebase_auth import sign_in_with_email
+        with st.spinner("Đang đăng nhập..."):
+            user_data = sign_in_with_email(email, password)
+        _set_user_session(user_data)
+        st.success("✅ Đăng nhập thành công!")
+        st.rerun()
+    except Exception as err:
+        st.error(_parse_firebase_error(err))
+
+
+def _handle_email_signup(email: str, password: str):
+    """Handle email/password signup."""
+    try:
+        from auth.firebase_auth import sign_up_with_email
+        with st.spinner("Đang tạo tài khoản..."):
+            user_data = sign_up_with_email(email, password)
+        _set_user_session(user_data)
+        st.success("✅ Tạo tài khoản thành công! Đang chuyển hướng...")
+        st.rerun()
+    except Exception as err:
+        st.error(_parse_firebase_error(err))
+
+
+def _render_google_signin_button(key_suffix: str = "login"):
+    """Render Google Sign-In using OAuth2 redirect flow with native Streamlit button."""
+    if not GOOGLE_CLIENT_ID:
+        st.info("💡 Để bật đăng nhập Google, hãy thêm `GOOGLE_CLIENT_ID` vào file `.env`")
+        return
+
+    # Check for Google token in query params (callback from OAuth)
+    query_params = st.query_params
+    google_token = query_params.get("google_token", None)
+
+    if google_token:
+        try:
+            from auth.firebase_auth import sign_in_with_google_token
+            with st.spinner("Đang đăng nhập với Google..."):
+                user_data = sign_in_with_google_token(google_token)
+            _set_user_session(user_data)
+            st.query_params.clear()
+            st.success("✅ Đăng nhập Google thành công!")
+            st.rerun()
+        except Exception as err:
+            st.query_params.clear()
+            st.error(f"Lỗi đăng nhập Google: {_parse_firebase_error(err)}")
+        return
+
+    # Build Google OAuth2 authorization URL
+    import urllib.parse
+    redirect_uri = "http://localhost:8501"
+    oauth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "response_type": "id_token",
+        "scope": "openid email profile",
+        "nonce": str(hash(str(st.session_state))),
+    })
+
+    # Render a styled Google button using Streamlit markdown + link
+    st.markdown(f"""
+    <a href="{oauth_url}" target="_self" style="
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.6rem;
+        width: 100%;
+        padding: 0.75rem 1.5rem;
+        background: white;
+        border: 1.5px solid #dadce0;
+        border-radius: 12px;
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: #3c4043;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-decoration: none;
+        box-sizing: border-box;
+    " onmouseover="this.style.background='#f8f9fa';this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)'"
+       onmouseout="this.style.background='white';this.style.boxShadow='none'">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+             width="20" height="20" alt="Google">
+        Đăng nhập với Google
+    </a>
+    """, unsafe_allow_html=True)
+
+
+# ──────────────────────────────────────────────
+#  Main app (after auth)
+# ──────────────────────────────────────────────
+
 def main():
     """Main application entry point."""
+    _init_session_state()
+
+    # Handle Google OAuth callback — id_token comes in URL fragment (#)
+    # This JS extracts it and converts to a query param Streamlit can read
+    st.markdown("""
+    <script>
+        (function() {
+            if (window.location.hash) {
+                var params = new URLSearchParams(window.location.hash.substring(1));
+                var idToken = params.get('id_token');
+                if (idToken) {
+                    window.location.href = window.location.pathname + '?google_token=' + encodeURIComponent(idToken);
+                }
+            }
+        })();
+    </script>
+    """, unsafe_allow_html=True)
+
+    # Check authentication
+    if not st.session_state.authenticated:
+        _render_auth_page()
+        return
 
     # --- Header ---
     st.markdown("""
@@ -155,6 +590,27 @@ def main():
 
     # --- Sidebar ---
     with st.sidebar:
+        # User info bar
+        user_email = st.session_state.user_email or "User"
+        display_name = st.session_state.display_name or user_email.split("@")[0]
+        initial = display_name[0].upper() if display_name else "U"
+
+        st.markdown(f"""
+        <div class="user-bar">
+            <div class="user-avatar">{initial}</div>
+            <div>
+                <div class="user-email">{display_name}</div>
+                <div class="user-label">{user_email}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if st.button("🚪 Đăng xuất", use_container_width=True):
+            _clear_user_session()
+            st.rerun()
+
+        st.divider()
+
         st.header("📋 Research Profile")
         st.caption("Describe your research interests to find relevant papers.")
 
@@ -322,9 +778,13 @@ def _render_paper_card(card: FinalPaperCard, rank: int):
 
 def _display_welcome():
     """Display welcome message when no results are loaded."""
-    st.markdown("""
+    user_name = st.session_state.display_name or st.session_state.user_email or "Researcher"
+    if "@" in user_name:
+        user_name = user_name.split("@")[0]
+
+    st.markdown(f"""
     <div style="text-align: center; padding: 3rem 1rem;">
-        <h2 style="color: #4f46e5;">Welcome to AI SOTA Radar</h2>
+        <h2 style="color: #4f46e5;">Xin chào, {user_name}! 👋</h2>
         <p style="color: #6b7280; font-size: 1.1rem; max-width: 600px; margin: 0 auto;">
             Describe your research interests in the sidebar, then click
             <strong>🚀 Find Papers</strong> to discover the most relevant
