@@ -489,12 +489,20 @@ def _handle_email_signup(email: str, password: str):
 
 
 def _render_google_signin_button(key_suffix: str = "login"):
-    """Render Google Sign-In using OAuth2 redirect flow with native Streamlit button."""
-    if not GOOGLE_CLIENT_ID:
-        st.info("💡 Để bật đăng nhập Google, hãy thêm `GOOGLE_CLIENT_ID` vào file `.env`")
+    """Render Google Sign-In using Firebase JS SDK signInWithPopup.
+
+    Uses an embedded HTML component with Firebase JS SDK to handle
+    the entire OAuth flow in the browser. The ID token is sent back
+    to Streamlit via query params redirect.
+    """
+    from config import FIREBASE_API_KEY, FIREBASE_AUTH_DOMAIN, FIREBASE_PROJECT_ID
+    import streamlit.components.v1 as components
+
+    if not FIREBASE_API_KEY:
+        st.info("💡 Để bật đăng nhập Google, hãy thêm Firebase config vào file `.env`")
         return
 
-    # Check for Google token in query params (callback from OAuth)
+    # Check for Google token in query params (callback from popup)
     query_params = st.query_params
     google_token = query_params.get("google_token", None)
 
@@ -505,50 +513,67 @@ def _render_google_signin_button(key_suffix: str = "login"):
                 user_data = sign_in_with_google_token(google_token)
             _set_user_session(user_data)
             st.query_params.clear()
-            st.success("✅ Đăng nhập Google thành công!")
             st.rerun()
         except Exception as err:
             st.query_params.clear()
             st.error(f"Lỗi đăng nhập Google: {_parse_firebase_error(err)}")
         return
 
-    # Build Google OAuth2 authorization URL
-    import urllib.parse
-    redirect_uri = "http://localhost:8501"
-    oauth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": redirect_uri,
-        "response_type": "id_token",
-        "scope": "openid email profile",
-        "nonce": str(hash(str(st.session_state))),
-    })
+    # Render Firebase popup sign-in button as HTML component
+    google_signin_html = f"""
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <style>
+        body {{ margin: 0; padding: 0; }}
+        .google-btn {{
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            width: 100%; padding: 10px 16px;
+            background: white; border: 1.5px solid #dadce0; border-radius: 12px;
+            cursor: pointer; font-family: 'Inter', 'Segoe UI', sans-serif;
+            font-size: 14px; font-weight: 500; color: #3c4043;
+            transition: all 0.2s; box-sizing: border-box;
+        }}
+        .google-btn:hover {{ background: #f8f9fa; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
+        #status {{ text-align: center; font-size: 12px; color: #6b7280; margin-top: 4px; min-height: 16px; }}
+    </style>
 
-    # Render a styled Google button using Streamlit markdown + link
-    st.markdown(f"""
-    <a href="{oauth_url}" target="_self" style="
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.6rem;
-        width: 100%;
-        padding: 0.75rem 1.5rem;
-        background: white;
-        border: 1.5px solid #dadce0;
-        border-radius: 12px;
-        font-size: 0.95rem;
-        font-weight: 500;
-        color: #3c4043;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        text-decoration: none;
-        box-sizing: border-box;
-    " onmouseover="this.style.background='#f8f9fa';this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)'"
-       onmouseout="this.style.background='white';this.style.boxShadow='none'">
-        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-             width="20" height="20" alt="Google">
-        Đăng nhập với Google
-    </a>
-    """, unsafe_allow_html=True)
+    <button class="google-btn" onclick="googleSignIn()" id="gbtn">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18">
+        <span>Đăng nhập với Google</span>
+    </button>
+    <div id="status"></div>
+
+    <script>
+        const cfg = {{ apiKey: "{FIREBASE_API_KEY}", authDomain: "{FIREBASE_AUTH_DOMAIN}", projectId: "{FIREBASE_PROJECT_ID}" }};
+        if (!firebase.apps.length) firebase.initializeApp(cfg);
+
+        function googleSignIn() {{
+            document.getElementById('status').textContent = 'Đang mở cửa sổ đăng nhập...';
+            document.getElementById('gbtn').disabled = true;
+            const provider = new firebase.auth.GoogleAuthProvider();
+            firebase.auth().signInWithPopup(provider)
+                .then(result => result.user.getIdToken())
+                .then(idToken => {{
+                    document.getElementById('status').textContent = 'Thành công! Đang tải...';
+                    // Navigate parent (Streamlit) to callback URL with token
+                    const url = new URL(window.parent.location.href);
+                    url.searchParams.set('google_token', idToken);
+                    // Clear hash if any
+                    url.hash = '';
+                    window.parent.location.href = url.toString();
+                }})
+                .catch(err => {{
+                    document.getElementById('gbtn').disabled = false;
+                    if (err.code === 'auth/popup-closed-by-user') {{
+                        document.getElementById('status').textContent = '';
+                    }} else {{
+                        document.getElementById('status').textContent = 'Lỗi: ' + err.message;
+                    }}
+                }});
+        }}
+    </script>
+    """
+    components.html(google_signin_html, height=65)
 
 
 # ──────────────────────────────────────────────
@@ -558,22 +583,6 @@ def _render_google_signin_button(key_suffix: str = "login"):
 def main():
     """Main application entry point."""
     _init_session_state()
-
-    # Handle Google OAuth callback — id_token comes in URL fragment (#)
-    # This JS extracts it and converts to a query param Streamlit can read
-    st.markdown("""
-    <script>
-        (function() {
-            if (window.location.hash) {
-                var params = new URLSearchParams(window.location.hash.substring(1));
-                var idToken = params.get('id_token');
-                if (idToken) {
-                    window.location.href = window.location.pathname + '?google_token=' + encodeURIComponent(idToken);
-                }
-            }
-        })();
-    </script>
-    """, unsafe_allow_html=True)
 
     # Check authentication
     if not st.session_state.authenticated:
@@ -713,14 +722,20 @@ def _display_results(results: list[FinalPaperCard]):
     """Display paper results as cards."""
 
     # Stats bar
-    avg_score = sum(r.relevance_score for r in results) / len(results) if results else 0
     sources = set(r.source for r in results)
+    # Only show average if scores are meaningful (not all fallback 25)
+    real_scores = [r.relevance_score for r in results if r.relevance_score != 25
+                   or r.relevance_reason != "Fallback score — LLM scoring unavailable"]
 
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("📄 Papers Found", len(results))
     with col2:
-        st.metric("📊 Avg. Relevance", f"{avg_score:.0f}/100")
+        if real_scores:
+            avg_score = sum(real_scores) / len(real_scores)
+            st.metric("📊 Avg. Relevance", f"{avg_score:.0f}/100")
+        else:
+            st.metric("📊 Avg. Relevance", "N/A")
     with col3:
         st.metric("🔗 Sources", ", ".join(s.replace("_", " ").title() for s in sources))
 
@@ -733,47 +748,65 @@ def _display_results(results: list[FinalPaperCard]):
 
 def _render_paper_card(card: FinalPaperCard, rank: int):
     """Render a single paper card."""
-
-    # Score badge color
-    if card.relevance_score >= 70:
-        score_class = "score-high"
-    elif card.relevance_score >= 40:
-        score_class = "score-medium"
-    else:
-        score_class = "score-low"
+    import html as html_mod
 
     # Authors display
-    authors_display = ", ".join(card.authors[:3])
+    authors_display = html_mod.escape(", ".join(card.authors[:3]))
     if len(card.authors) > 3:
         authors_display += f" +{len(card.authors) - 3} more"
 
+    # Safe escape all dynamic text
+    safe_title = html_mod.escape(card.title)
+    safe_reason = html_mod.escape(card.relevance_reason or "")
+    safe_problem = html_mod.escape(card.problem or "N/A")
+    safe_method = html_mod.escape(card.method or "N/A")
+    safe_result = html_mod.escape(card.key_result or "N/A")
+    safe_source = html_mod.escape(card.source.replace('_', ' ').title())
+    safe_year = html_mod.escape(str(card.year or 'N/A'))
+
     # Title with link
-    title_html = f'<a href="{card.url}" target="_blank">{card.title}</a>' if card.url else card.title
+    if card.url:
+        safe_url = html_mod.escape(card.url)
+        title_html = f'<a href="{safe_url}" target="_blank">{safe_title}</a>'
+    else:
+        title_html = safe_title
 
-    st.markdown(f"""
-    <div class="paper-card">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-            <div style="flex: 1;">
-                <div class="paper-title">#{rank} {title_html}</div>
-                <div class="paper-meta">
-                    👤 {authors_display} &nbsp;|&nbsp; 📅 {card.year or 'N/A'} &nbsp;|&nbsp;
-                    📦 {card.source.replace('_', ' ').title()}
-                </div>
-            </div>
-            <div>
-                <span class="score-badge {score_class}">{card.relevance_score}/100</span>
-            </div>
-        </div>
+    # Only show relevance score if it's a real score (not fallback 25)
+    is_real_score = card.relevance_score != 25 or card.relevance_reason != "Fallback score — LLM scoring unavailable"
+    if is_real_score and card.relevance_score > 0:
+        if card.relevance_score >= 70:
+            score_class = "score-high"
+        elif card.relevance_score >= 40:
+            score_class = "score-medium"
+        else:
+            score_class = "score-low"
+        score_html = f'<span class="score-badge {score_class}">{card.relevance_score}/100</span>'
+    else:
+        score_html = ''
 
-        <div class="reason-text">{card.relevance_reason}</div>
+    # Only show reason if it's meaningful
+    reason_html = f'<div class="reason-text">{safe_reason}</div>' if safe_reason and "Fallback" not in safe_reason else ''
 
-        <div class="summary-section">
-            <div><span class="summary-label">🎯 Problem: </span><span class="summary-text">{card.problem}</span></div>
-            <div><span class="summary-label">🔧 Method: </span><span class="summary-text">{card.method}</span></div>
-            <div><span class="summary-label">📈 Key Result: </span><span class="summary-text">{card.key_result}</span></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    card_html = (
+        f'<div class="paper-card">'
+        f'<div style="display: flex; justify-content: space-between; align-items: flex-start;">'
+        f'<div style="flex: 1;">'
+        f'<div class="paper-title">#{rank} {title_html}</div>'
+        f'<div class="paper-meta">'
+        f'👤 {authors_display} &nbsp;|&nbsp; 📅 {safe_year} &nbsp;|&nbsp; 📦 {safe_source}'
+        f'</div>'
+        f'</div>'
+        f'<div>{score_html}</div>'
+        f'</div>'
+        f'{reason_html}'
+        f'<div class="summary-section">'
+        f'<div><span class="summary-label">🎯 Problem: </span><span class="summary-text">{safe_problem}</span></div>'
+        f'<div><span class="summary-label">🔧 Method: </span><span class="summary-text">{safe_method}</span></div>'
+        f'<div><span class="summary-label">📈 Key Result: </span><span class="summary-text">{safe_result}</span></div>'
+        f'</div>'
+        f'</div>'
+    )
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def _display_welcome():

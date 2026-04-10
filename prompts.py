@@ -96,3 +96,58 @@ Paper Abstract: {abstract}
 Return ONLY valid JSON in this exact format:
 {{"problem": "<what problem does the paper address>", "method": "<what method/approach is proposed>", "key_result": "<what is the key finding or result>"}}
 """
+
+# --- LinkedIn Extraction ---
+LINKEDIN_EXTRACTION_PROMPT = """You are an information extractor.
+
+Given raw text copied from a LinkedIn profile page, extract the following:
+- headline: The person's professional headline/title
+- roles: List of job titles or positions held
+- skills: List of professional/technical skills
+
+Rules:
+- Extract ONLY information that is explicitly present in the text
+- Do NOT invent or assume information
+- Keep roles and skills concise (2-5 words each)
+- Maximum 10 roles and 20 skills
+
+LinkedIn Profile Text:
+{linkedin_text}
+
+Return ONLY valid JSON in this exact format:
+{{"headline": "<professional headline>", "roles": ["role1", "role2"], "skills": ["skill1", "skill2"]}}
+"""
+
+# --- Profile Aggregation ---
+PROFILE_AGGREGATION_PROMPT = """You are a research profile analyzer.
+
+Given data from multiple sources about a researcher, create a unified research profile.
+Prioritize signals by reliability: Scholar data > User description > LinkedIn data.
+
+SOURCE DATA:
+
+Google Scholar Keywords: {scholar_keywords}
+Google Scholar Research Areas: {scholar_areas}
+Recent Paper Titles:
+{paper_titles}
+
+LinkedIn Headline: {linkedin_headline}
+LinkedIn Roles: {linkedin_roles}
+LinkedIn Skills: {linkedin_skills}
+
+User's Own Research Description: {user_description}
+
+TASK:
+Classify and merge all signals into a structured profile. Be specific and technical.
+
+Rules:
+- core_topics: 3-7 main research topics (e.g., "natural language processing", "computer vision")
+- methods: 3-7 specific methods/techniques (e.g., "transformer architecture", "reinforcement learning")
+- applications: 2-5 application domains (e.g., "healthcare", "autonomous driving")
+- keywords: 10-15 specific technical keywords for search
+- query_hints: 3-5 specific search queries that would find relevant papers for this researcher
+
+Return ONLY valid JSON:
+{{"core_topics": [], "methods": [], "applications": [], "keywords": [], "query_hints": []}}
+"""
+

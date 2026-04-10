@@ -141,14 +141,19 @@ def _score_batch(
             temperature=OPENAI_TEMPERATURE,
         )
         content = response.choices[0].message.content or ""
+        logger.info("LLM scoring response length: %d chars", len(content))
+        logger.debug("LLM scoring raw response: %s", content[:500])
     except Exception as err:
         logger.error("LLM batch scoring failed: %s", err)
         return _fallback_scores(papers)
 
     parsed = safe_parse_json(content)
     if not isinstance(parsed, list):
-        logger.warning("LLM batch scoring returned non-list, using fallback")
+        logger.warning("LLM batch scoring returned non-list (type=%s), using fallback. Content: %s",
+                       type(parsed).__name__, content[:300])
         return _fallback_scores(papers)
+
+    logger.info("LLM returned %d scoring results for %d papers", len(parsed), len(papers))
 
     results: list[FilterResult] = []
     # Map parsed results by paper_id

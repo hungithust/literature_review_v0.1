@@ -40,6 +40,9 @@ FILTER_MIN_SCORE: int = 0  # minimum relevance score to include (0 = show all)
 ENABLE_ARXIV_FALLBACK: bool = os.getenv("ENABLE_ARXIV_FALLBACK", "true").lower() == "true"
 ENABLE_ARXIV_ALWAYS: bool = os.getenv("ENABLE_ARXIV_ALWAYS", "false").lower() == "true"
 
+# --- Profile Configuration ---
+SCHOLAR_MAX_PAPERS: int = int(os.getenv("SCHOLAR_MAX_PAPERS", "20"))
+
 # --- Firebase Authentication ---
 FIREBASE_API_KEY: str = os.getenv("FIREBASE_API_KEY", "")
 FIREBASE_AUTH_DOMAIN: str = os.getenv("FIREBASE_AUTH_DOMAIN", "")
