@@ -1,0 +1,22 @@
+[
+    {
+        "name": "NLP & Large Language Models",
+        "description": "Deep Learning for NLP, large language models, retrieval-augmented generation, instruction tuning, prompt engineering, in-context learning"
+    },
+    {
+        "name": "Multimodal Learning",
+        "description": "Multimodal learning, vision-language models, efficient adaptation methods, cross-modal alignment, visual instruction tuning"
+    },
+    {
+        "name": "AI for Protein Science",
+        "description": "AI for protein function prediction, biological sequence modeling, protein representation learning, structure prediction, drug discovery"
+    },
+    {
+        "name": "Time-Series Forecasting",
+        "description": "Time-series forecasting with deep learning, temporal transformers, foundation models for time series, anomaly detection in temporal data"
+    },
+    {
+        "name": "Graph Neural Networks",
+        "description": "Graph neural networks for scientific and biomedical applications, molecular property prediction, knowledge graph reasoning, drug-drug interaction"
+    }
+]

@@ -1,0 +1,5 @@
+streamlit>=1.30.0
+httpx>=0.25.0
+pydantic>=2.0.0
+openai>=1.10.0
+xmltodict>=0.13.0
